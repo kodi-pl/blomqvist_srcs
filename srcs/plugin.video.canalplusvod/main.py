@@ -193,7 +193,10 @@ def GenList():
             if title.__contains__("tvp 3"):
                 grouptitle = "OGÓLNE"
             canalurl = build_url({'name': item['title'],'moviescount': 0,'url': item['url'],'image': item['image'],'movie': True,'mode': mud,'page': page})
-            m3u8.addM3UChannel(count, item['title'], item['image'], grouptitle, count, canalurl)
+            try:
+                 m3u8.addM3UChannel(count, item['title'], item['image'], grouptitle, count, canalurl)
+            except:
+                 m3u8.addM3UChannel(count, item['title'].decode('utf-8'), item['image'], grouptitle, count, canalurl)
             count += 1
         m3ufile = open(profile + 'canalPLUS-VOD.m3u8', 'w+')
         m3ufile.write(m3u8.getM3UList())
