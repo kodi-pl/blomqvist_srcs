@@ -494,6 +494,8 @@ class IPLA(object):
                 else:
                     myper=[]
                     for i in data["result"]["accessGroups"]:
+                        if ':true' in i:
+                            myper.append(str(i))
                         if 'sc:' in i:
                             myper.append(str(i))
                         if 'oth:' in i:
