@@ -6,7 +6,6 @@
 		<import addon="script.module.requests" />
 		<import addon="script.module.urllib3" />
 		<import addon="script.module.inputstreamhelper" version="0.3.3"/>
-		<import addon="script.module.kodi-six" />
 		<import addon="script.module.kodipl" />
 	</requires>
 	<extension point="xbmc.python.pluginsource" library="main.py">

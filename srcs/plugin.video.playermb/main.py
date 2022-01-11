@@ -1,11 +1,3 @@
-# -*- coding: utf-8 -*-
-from __future__ import absolute_import, division, unicode_literals, print_function
-import kodipl.future  # must be almost at top (just after __future__)
-from future.utils import PY2
-if PY2:
-    from builtins import *  # dirty hack, force py2 to be like py3
-from future.utils import python_2_unicode_compatible, text_type, binary_type
-
 import sys
 import re
 import os
@@ -254,7 +246,6 @@ def deunicode_params(params):
     return params
 
 
-@python_2_unicode_compatible
 class ThreadCall(Thread):
     """
     Async call. Create thread for func(*args, **kwargs), should be started.
@@ -278,7 +269,6 @@ class ThreadCall(Thread):
         return th
 
 
-@python_2_unicode_compatible
 class ThreadPool(object):
     """
     Async with-statement.
