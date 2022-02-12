@@ -1,3 +1,4 @@
+import html
 import sys
 import re
 import os
@@ -8,26 +9,24 @@ from collections import namedtuple
 from datetime import date, datetime, timedelta
 from contextlib import contextmanager
 import random
-from inspect import ismethod
-from kodipl import SimplePlugin
 from kodipl.site import JSONDecodeError
-from kodipl.addon import call
-from kodipl.addon import entry
+from kodipl import (
+    SimplePlugin,
+    call, entry,
+)
 from kodipl.logs import log, flog
-from kodipl.kodi import K18
 from kodipl.utils import adict
 from kodipl.format import sectfmt
 
 from urllib.parse import parse_qs, parse_qsl, urlencode, quote_plus, unquote_plus
 
-if sys.version_info >= (3, 0):
-    basestring = str
-    unicode = str
-
-
 import json
 import io
 
+from threading import Thread
+import inputstreamhelper
+from resources.lib.udata import AddonUserData
+# from resources.lib.tools import U, uclean, NN, fragdict
 
 def save_ints(path, seq):
     if seq:
@@ -42,18 +41,6 @@ def load_ints(path):
 
 
 
-from threading import Thread
-import requests
-import urllib3  # already used by "requests"
-from kodipl.kodi import xbmcgui
-from kodipl.kodi import xbmcplugin
-from kodipl.kodi import xbmcaddon
-from kodipl.kodi import xbmc
-from kodipl.kodi import xbmcvfs
-import inputstreamhelper
-
-from resources.lib.udata import AddonUserData
-# from resources.lib.tools import U, uclean, NN, fragdict
 
 
 MetaDane = namedtuple('MetaDane', 'tytul opis foto sezon epizod fanart thumb landscape poster allowed')
@@ -109,116 +96,12 @@ slug_blacklist = {
 TIMEOUT = 15
 
 
-# URL to test: https://wrong.host.badssl.com
-class GlobalOptions(object):
-    """Global options."""
-
-    def __init__(self, settings):
-        self.settings = settings
-        self._session_level = 0
-        self.verify_ssl = self.settings.get_bool('verify_ssl')
-        self.use_urllib3 = self.settings.get_bool('use_urllib3')
-        self.ssl_dialog_launched = self.settings.get_bool('ssl_dialog_launched')
-
-    def ssl_dialog(self, using_urllib3=False):
-        if self.ssl_dialog_launched and self._session_level == 0:
-            return
-        using_urllib3 = bool(using_urllib3)
-        options = [u'Wyłącz weryfikację SSL', u'Bez zmian']
-        if using_urllib3:
-            options.insert(0, u'Użyj wolniejszego połączenia (zalecane)')
-        num = xbmcgui.Dialog().select(u'Problem z połączeniem SSL, co teraz?', options)
-        if using_urllib3:
-            # getRequests3() error
-            if num == 0:  # Użyj wolniejszego połączenia
-                self.use_urllib3 = False
-            elif num == 1:  # Wyłącz weryfikację SSL
-                self.verify_ssl = False
-        else:
-            # getRequests() error
-            if num == 0:  # Wyłącz weryfikację SSL
-                self.verify_ssl = False
-        self.settings.set_bool('use_urllib3', self.use_urllib3)
-        self.settings.set_bool('verify_ssl', self.verify_ssl)
-        self.settings.set_bool('ssl_dialog_launched', True)
-        self.ssl_dialog_launched = True
-
-    def __enter__(self):
-        self._session_level += 1
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self._session_level -= 1
-
-
-# goptions = GlobalOptions()
-
-
 def media(name, fallback=None):
     """Returns full path to media file."""
     path = os.path.join(MEDIA, name)
     if fallback and not os.path.exists(path):
         return fallback
     return path
-
-
-def build_url(query):
-    query = deunicode_params(query)
-    return base_url + '?' + urlencode(query)
-
-
-def add_item(url, name, image, mode, folder=False, isPlayable=False, infoLabels=None, movie=True,
-             itemcount=1, page=1, fanart=None, moviescount=0, properties=None, thumb=None,
-             contextmenu=None, art=None, linkdata=None, fallback_image=ADDON_ICON,
-             label2=None):
-    assert False
-    list_item = xbmcgui.ListItem(label=name)
-    if label2 is not None:
-        list_item.setLabel2(label2)
-    if isPlayable:
-        list_item.setProperty("isPlayable", 'true')
-    if not infoLabels:
-        infoLabels = {'title': name, 'plot': name}
-    list_item.setInfo(type="video", infoLabels=infoLabels)
-    if not image:
-        image = fallback_image
-    if image and image.startswith('//'):
-        image = 'https:' + image
-    art = {} if art is None else dict(art)
-    if fanart:
-        art['fanart'] = fanart
-    if thumb:
-        art['thumb'] = fanart
-    art.setdefault('thumb', image)
-    art.setdefault('poster', image)
-    art.setdefault('banner', art.get('landscape', image))
-    art.setdefault('fanart', FANART)
-    art = {k: 'https:' + v if v and v.startswith('//') else v for k, v in art.items()}
-    list_item.setArt(art)
-    if properties:
-        list_item.setProperties(properties)
-    if contextmenu:
-        list_item.addContextMenuItems(contextmenu, replaceItems=False)
-    # link data used to build link,to support old one
-    linkdata = {} if linkdata is None else dict(linkdata)
-    linkdata.setdefault('name', name)
-    linkdata.setdefault('image', image)
-    linkdata.setdefault('page', page)
-    # add item
-    ok = xbmcplugin.addDirectoryItem(
-        handle=addon_handle,
-        url=build_url({'mode': mode, 'url': url, 'page': linkdata['page'], 'moviescount': moviescount,
-                       'movie': movie, 'name': linkdata['name'], 'image': linkdata['image']}),
-        listitem=list_item,
-        isFolder=folder)
-    return ok
-
-
-def setView(typ):
-    if addon.getSetting('auto-view') == 'false':
-        xbmcplugin.setContent(addon_handle, 'videos')
-    else:
-        xbmcplugin.setContent(addon_handle, typ)
 
 
 def remove_html_tags(text, nice=True):
@@ -335,36 +218,10 @@ def busy():
         xbmc.executebuiltin('ActivateWindow(busydialog)')
 
 
-def PLchar(*args, **kwargs):
-    sep = kwargs.pop('sep', ' ')
-    if kwargs:
-        raise TypeError('Unexpected keywoard arguemnt(s): %s' % ' '.join(kwargs.keys()))
-    out = ''
-    for i, char in enumerate(args):
-        if type(char) is not str:
-            char = char.encode('utf-8')
-        char = char.replace('\\u0105','\xc4\x85').replace('\\u0104','\xc4\x84')
-        char = char.replace('\\u0107','\xc4\x87').replace('\\u0106','\xc4\x86')
-        char = char.replace('\\u0119','\xc4\x99').replace('\\u0118','\xc4\x98')
-        char = char.replace('\\u0142','\xc5\x82').replace('\\u0141','\xc5\x81')
-        char = char.replace('\\u0144','\xc5\x84').replace('\\u0144','\xc5\x83')
-        char = char.replace('\\u00f3','\xc3\xb3').replace('\\u00d3','\xc3\x93')
-        char = char.replace('\\u015b','\xc5\x9b').replace('\\u015a','\xc5\x9a')
-        char = char.replace('\\u017a','\xc5\xba').replace('\\u0179','\xc5\xb9')
-        char = char.replace('\\u017c','\xc5\xbc').replace('\\u017b','\xc5\xbb')
-        char = char.replace('&#8217;',"'")
-        char = char.replace('&#8211;',"-")
-        char = char.replace('&#8230;',"...")
-        char = char.replace('&#8222;','"').replace('&#8221;','"')
-        char = char.replace('[&hellip;]',"...")
-        char = char.replace('&#038;',"&")
-        char = char.replace('&#039;',"'")
-        char = char.replace('&quot;','"')
-        char = char.replace('&nbsp;',".").replace('&amp;','&')
-        if i:
-            out += sep
-        out += char
-    return out
+# TODO: remove, replace with html.parse.something
+def plchar(*args, sep: str = ' '):
+    """Remove HTML entitiees on all args and join by sep."""
+    return sep.join(map(html.unescape, args))
 
 
 def historyLoad():
@@ -372,16 +229,12 @@ def historyLoad():
 
 
 def historyAdd(entry):
-    if not isinstance(entry, unicode):
-        entry = entry.decode('utf-8')
     history = historyLoad()
     history.insert(0, entry)
     addon_data.set('history.items', history[:HISTORY_SIZE])
 
 
 def historyDel(entry):
-    if not isinstance(entry, unicode):
-        entry = entry.decode('utf-8')
     history = [item for item in historyLoad() if item != entry]
     addon_data.set('history.items', history[:HISTORY_SIZE])
 
@@ -393,17 +246,17 @@ def historyClear():
 class CountSubfolders(object):
     """Count subfolders (avaliable items in sections) with statement object."""
 
-    def __init__(self, plugin, data, loader, kwargs, sumarize_item=False):
+    def __init__(self, plugin, data, loader, kwargs, summarize_item=False):
         self.plugin = plugin
         self.data = data
         self.loader = loader
         self.kwargs = kwargs
         self._count = None
-        self.sumarize_item = sumarize_item
+        self.summarize_item = summarize_item
 
     @property
     def count(self):
-        """Returns avaliable item count in section by section id."""
+        """Returns available item count in section by section id."""
         if self._count is None:
             def convert(data):
                 if isinstance(data, Mapping):
@@ -413,17 +266,17 @@ class CountSubfolders(object):
                 return data
 
             # self.plugin.refreshTokenTVN()
-            xbmc.log('PLAYER.PL: count folder start', xbmc.LOGDEBUG)
+            log.debug('PLAYER.PL: count folder start')
             threads = {item['id']: ThreadCall.started(self.loader, item, **self.kwargs)
                        for item in self.data}
-            if self.sumarize_item and len(self.data) > 1:
+            if self.summarize_item and len(self.data) > 1:
                 threads[None] = ThreadCall.started(self.loader, {'id': None}, **self.kwargs)
-            xbmc.log('PLAYER.PL: count folder prepared', xbmc.LOGDEBUG)
+            log.debug('PLAYER.PL: count folder prepared')
             for th in threads.values():
                 th.join()
-            xbmc.log('PLAYER.PL: count folder joined', xbmc.LOGDEBUG)
+            log.debug('PLAYER.PL: count folder joined')
             self._count = {sid: convert(thread.result) for sid, thread in threads.items()}
-            xbmc.log('PLAYER.PL: count folder catch data: %r' % self._count, xbmc.LOGINFO)
+            log.info('PLAYER.PL: count folder catch data: %r' % self._count)
         return self._count
 
     def get(self, vid):
@@ -463,6 +316,7 @@ class API(object):
 
 
 class PlayerPL(SimplePlugin):
+    """Player TVN."""
 
     MaxMax = 10000
 
@@ -572,7 +426,7 @@ class PlayerPL(SimplePlugin):
         try:
             data = self.jpost(self.POSTTOKEN, data=params, headers=self.HEADERS3)
         except JSONDecodeError:
-            xbmc.log('PLAYER.PL: Can not refresh token, there is no JSON', xbmc.LOGERROR)
+            log.error('PLAYER.PL: Can not refresh token, there is no JSON')
             return
         flog('****************** {data!r}')
         if data.get('error_description') == 'Token is still valid.':
@@ -590,6 +444,7 @@ class PlayerPL(SimplePlugin):
         return self._tokenTVN_data
 
     def get_meta_data(self, data):
+        assert False
         if not data.get('active', True):
             return '', '', '', None, None
         tytul = data['title']
@@ -650,8 +505,8 @@ class PlayerPL(SimplePlugin):
             self.create_datas()
         if not self.settings.refresh_token and self.settings.logged:
             self.remove_mylist()
-            POST_DATA = 'scope=/pub-api/user/me&client_id=Player_TV_Android_28d3dcc063672068'
-            data = self.jpost(self.GETTOKEN, data=POST_DATA, headers=self.HEADERS3)
+            postdata = 'scope=/pub-api/user/me&client_id=Player_TV_Android_28d3dcc063672068'
+            data = self.jpost(self.GETTOKEN, data=postdata, headers=self.HEADERS3)
             kod = data.get('code')
             dg = dialog_progress()
             dg.create('Uwaga', 'Przepisz kod: [B]%s[/B]\n Na stronie https://player.pl/zaloguj-tv' % kod)
@@ -661,7 +516,7 @@ class PlayerPL(SimplePlugin):
             increment = 100 // time_to_wait
             cancelled = False
             while secs <= time_to_wait:
-                if (dg.iscanceled()):
+                if dg.iscanceled():
                     cancelled = True
                     break
                 if secs != 0:
@@ -671,8 +526,8 @@ class PlayerPL(SimplePlugin):
                     percent = 100
                 else:
                     percent = increment * secs
-                POST_DATA = 'grant_type=tvn_reverse_onetime_code&code=%s&client_id=Player_TV_Android_28d3dcc063672068' % kod
-                data = self.jpost(self.POSTTOKEN, data=POST_DATA, headers=self.HEADERS3)
+                postdata = 'grant_type=tvn_reverse_onetime_code&code=%s&client_id=Player_TV_Android_28d3dcc063672068' % kod
+                data = self.jpost(self.POSTTOKEN, data=postdata, headers=self.HEADERS3)
                 token_type = data.get("token_type")
                 if token_type == 'bearer':
                     break
@@ -692,7 +547,7 @@ class PlayerPL(SimplePlugin):
         if self.settings.refresh_token:
             PARAMS = {'4K': 'true', 'platform': PF}
             self.HEADERS2['Content-Type'] = 'application/json; charset=UTF-8'
-            POST_DATA = {
+            postdata = {
                 "agent": self.settings.usagent,
                 "agentVersion": self.settings.usagentver,
                 "appVersion": "1.0.38(62)",
@@ -702,16 +557,15 @@ class PlayerPL(SimplePlugin):
                 "token": self.settings.access_token,
                 "uid": self.settings.device_id
             }
-            data = self.jpost(self.SUBSCRIBER, data=POST_DATA, headers=self.HEADERS2, params=PARAMS)
+            data = self.jpost(self.SUBSCRIBER, data=postdata, headers=self.HEADERS2, params=PARAMS)
 
             self.settings.selected_profile = data.get('profile', {}).get('name')
             self.settings.selected_profile_id = data.get('profile', {}).get('externalUid')
             self.HEADERS2['API-ProfileUid'] = self.settings.selected_profile_id
 
     def getTranslate(self, id):
-        PARAMS = {'4K': 'true', 'platform': PF, 'id': id}
-        data = self.jget(self.TRANSLATE, headers=self.HEADERS2, params=PARAMS)
-        return data
+        params = {**self.PARAMS, 'id': id}
+        return self.jget(self.TRANSLATE, headers=self.HEADERS2, params=params)
 
     def getPlaylist(self, id_):
         self.refreshTokenTVN()
@@ -749,7 +603,7 @@ class PlayerPL(SimplePlugin):
             params = {'type': rodzaj, 'platform': UA, 'videoSessionId': vidsesid}
             data = self.jget(url, headers=HEADERSz, params=params)
 
-        xbmc.log('PLAYER.PL: getPlaylist(%r): data: %r' % (id_, data), xbmc.LOGWARNING)
+        log.warning('PLAYER.PL: getPlaylist(%r): data: %r' % (id_, data))
         vid = data['movie']
         outsub = []
         try:
@@ -887,11 +741,6 @@ class PlayerPL(SimplePlugin):
             url = self.api.vod_list
         data = self.jget(url, headers=self.HEADERS2, params=allparams)
         flog.info('PLAYER.PL: slug {slug}, gid {gid} done, data: {str(data)[:200]})')
-        # --- XXX --- XXX ---
-        import json
-        with open('/tmp/vod.json', 'w') as f:
-            json.dump(data, f)
-        # --- XXX ---
         if isinstance(data, Mapping):
             if isinstance(data.get('items'), list):
                 data = data['items']
@@ -939,14 +788,14 @@ class PlayerPL(SimplePlugin):
         except OSError:
             pass
         except Exception as exc:
-            xbmc.log('PLAYER.PL: Can not load mylist from %r: %r' % (path, exc), xbmc.LOGWARNING)
+            log.warning('PLAYER.PL: Can not load mylist from %r: %r' % (path, exc))
             self.remove_mylist()
         mylist = self.get_mylist()
         if auto_cache:
             try:
                 self.save_mylist(mylist)
             except OSError:
-                xbmc.log('PLAYER.PL: Can not save mylist to %r' % path, xbmc.LOGWARNING)
+                log.warning('PLAYER.PL: Can not save mylist to %r' % path)
         return mylist
 
     def remove_mylist(self):
@@ -955,8 +804,7 @@ class PlayerPL(SimplePlugin):
             try:
                 os.unlink(path)
             except Exception as exc:
-                xbmc.log('PLAYER.PL: Can not remove mylist cache %r: %r' % (path, exc),
-                         xbmc.LOGWARNING)
+                log.warning('PLAYER.PL: Can not remove mylist cache %r: %r' % (path, exc))
 
     @property
     def mylist(self):
@@ -983,6 +831,7 @@ class PlayerPL(SimplePlugin):
         if `isPlayable` is None (default) it's forced to `not folder`,
         because folder is not playable.
         """
+        assert False
         if vid in self._precessed_vid_list:
             xbmc.log(u'PLAYER.PL: item %s (%r) already processed' % (vid, meta.tytul), xbmc.LOGWARNING)
             if self.settings.remove_duplicates:
@@ -1070,11 +919,11 @@ class PlayerPL(SimplePlugin):
         """Start Kodi Addon Directory with sub-items counter."""
         sumarize_item = kwargs.pop('sumarize_item', False)  # Py2 doesn't allow: func(*args, key=None, **kwargs)
         with self.directory(*args, **kwargs) as kd:
-            kd.sumarize_item = {'id': None, 'name': self.all_items_title, '_properies_': {'SpecialSort': 'top'}}
+            kd.summarize_item = {'id': None, 'name': self.all_items_title, '_properies_': {'SpecialSort': 'top'}}
             # if all_items and len(data) > 1:
             #     data = list(data)
             #     data.insert(0, kd.sumarize_item)
-            kd.counter = CountSubfolders(self, data, loader, {}, sumarize_item=sumarize_item)
+            kd.counter = CountSubfolders(self, data, loader, {}, summarize_item=sumarize_item)
             # if all_items and len(data) > 1:
             #     kd.add(kd.parse(data[0]))
             yield kd
@@ -1340,7 +1189,7 @@ class PlayerPL(SimplePlugin):
             for item in genres:
                 self.add_list_item(kd, item, endpoint=call(self.category_genre, slug=slug, gid=item['id']))
             if kd.item_count() > 1:
-                self.add_list_item(kd, kd.sumarize_item, endpoint=call(self.category_genre, slug=slug))
+                self.add_list_item(kd, kd.summarize_item, endpoint=call(self.category_genre, slug=slug))
 
     def category_genre(self, slug, gid=None):
         """Get cetegory genre list -> list of VoD and VoD's group (like series)."""
