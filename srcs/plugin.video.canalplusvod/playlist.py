@@ -9,8 +9,8 @@ class Playlist:
         self.service = service
 
     def addM3UChannel(self, count, name, thumb, group, id, source):
-        nameStr = name
-        genreStr = group
+        nameStr = unicode(name)
+        genreStr = unicode(group)
         self.EXTM3U += '#EXTINF:0, tvg-id="' + nameStr
         self.EXTM3U += '" tvg-name="' + nameStr
         self.EXTM3U += '" tvg-logo="' + str(thumb)
